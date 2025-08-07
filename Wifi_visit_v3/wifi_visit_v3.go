@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strings"
 )
 
 type TransitionCount map[string]int
@@ -81,6 +82,7 @@ func runSimulations(
 ) map[int]int {
 	freq := make(map[int]int)
 	wifi_visit_case := make(map[keyProbability]int)
+
 	for i := 0; i < counter; i++ {
 		initial := initialstate(ET0, ET1)
 		countOfOnes, path := wifi_visit(initial, P10, P01, P1T, P0T, transitionCount)
@@ -100,46 +102,45 @@ func runSimulations(
 		}
 	}
 
-	keys := make([]keyProbability, 0, len(wifi_visit_case))
-	for k := range wifi_visit_case {
-		keys = append(keys, k)
-	}
-
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].countName == keys[j].countName {
-			return keys[i].nCount < keys[j].nCount
-		}
-		return keys[i].countName < keys[j].countName
-	})
-
 	var nValues []int
-	seen := make(map[int]bool)
 	for n := range freq {
-		if !seen[n] {
-			nValues = append(nValues, n)
-			seen[n] = true
-		}
+		nValues = append(nValues, n)
 	}
 	sort.Ints(nValues)
 
-	fmt.Print("\nTheoretical Wifi visit cases probabilities:\n")
-	for _, n := range nValues {
-		fmt.Printf("case1: P(n1 = %d) = %.6f\n", n, case1(lambda0, lambda1, mu, n))
-		fmt.Printf("case2: P(n1 = %d) = %.6f\n", n, case2(lambda0, lambda1, mu, n))
-		fmt.Printf("case3: P(n1 = %d) = %.6f\n", n, case3(lambda0, lambda1, mu, n))
-		fmt.Printf("case4: P(n1 = %d) = %.6f\n", n, case4(lambda0, lambda1, mu, n))
+	cases := []struct {
+		name string
+		fn   func(float64, float64, float64, int) float64
+	}{
+		{"case1", case1},
+		{"case2", case2},
+		{"case3", case3},
+		{"case4", case4},
 	}
-	fmt.Printf("Empirical Wifi visit cases probabilities:\n")
-	for _, k := range keys {
-		v := wifi_visit_case[k]
-		fmt.Printf("%s: n = %d : %d, p(%s,n1 = %d) = %.6f\n", k.countName, k.nCount, v, k.countName, k.nCount, float64(v)/float64(counter))
+
+	fmt.Println("\nTheoretical vs Empirical WiFi Visit Case Probabilities:")
+	fmt.Printf("%-6s %-4s %-15s %-15s %-10s\n", "Case", "n1", "Theoretical P", "Empirical P", "Difference")
+	fmt.Println(strings.Repeat("-", 60))
+
+	for _, c := range cases {
+		for _, n := range nValues {
+			theoretical := c.fn(lambda0, lambda1, mu, n)
+			key := keyProbability{countName: c.name, nCount: n}
+			empiricalCount, exists := wifi_visit_case[key]
+			empirical := 0.0
+			if exists {
+				empirical = float64(empiricalCount) / float64(counter)
+			}
+			diff := theoretical - empirical
+			fmt.Printf("%-6s %-4d %-15.8f %-15.8f %+-.8f\n",
+				c.name, n, theoretical, empirical, diff)
+		}
 	}
 
 	return freq
 }
 
 func displayProbabilities(n1 map[int]int, total int) {
-
 	fmt.Printf("\nResults from %d simulations:\n", total)
 	fmt.Printf("Frequency count: %v\n", n1)
 	fmt.Printf("\nProbabilities:\n")
