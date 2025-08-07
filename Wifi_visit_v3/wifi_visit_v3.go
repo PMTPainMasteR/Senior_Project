@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"sort"
 	"strings"
 )
 
@@ -87,13 +86,14 @@ func runSimulations(
 		initial := initialstate(ET0, ET1)
 		countOfOnes, path := wifi_visit(initial, P10, P01, P1T, P0T, transitionCount)
 		freq[countOfOnes]++
-		if path[0] == 1 {
+		switch path[0] {
+		case 1:
 			if path[len(path)-1] == 1 {
 				wifi_visit_case[keyProbability{countName: "case1", nCount: countOfOnes}]++
 			} else {
 				wifi_visit_case[keyProbability{countName: "case2", nCount: countOfOnes}]++
 			}
-		} else if path[0] == 0 {
+		case 0:
 			if path[len(path)-1] == 1 {
 				wifi_visit_case[keyProbability{countName: "case3", nCount: countOfOnes}]++
 			} else {
@@ -102,11 +102,12 @@ func runSimulations(
 		}
 	}
 
-	var nValues []int
+	maxN := 0
 	for n := range freq {
-		nValues = append(nValues, n)
+		if n > maxN {
+			maxN = n
+		}
 	}
-	sort.Ints(nValues)
 
 	cases := []struct {
 		name string
@@ -123,14 +124,11 @@ func runSimulations(
 	fmt.Println(strings.Repeat("-", 60))
 
 	for _, c := range cases {
-		for _, n := range nValues {
+		for n := 0; n <= maxN; n++ {
 			theoretical := c.fn(lambda0, lambda1, mu, n)
 			key := keyProbability{countName: c.name, nCount: n}
-			empiricalCount, exists := wifi_visit_case[key]
-			empirical := 0.0
-			if exists {
-				empirical = float64(empiricalCount) / float64(counter)
-			}
+			empiricalCount := wifi_visit_case[key]
+			empirical := float64(empiricalCount) / float64(counter)
 			diff := theoretical - empirical
 			fmt.Printf("%-6s %-4d %-15.8f %-15.8f %+-.8f\n",
 				c.name, n, theoretical, empirical, diff)
@@ -141,25 +139,28 @@ func runSimulations(
 }
 
 func displayProbabilities(n1 map[int]int, total int) {
+	maxN := 0
+	for n := range n1 {
+		if n > maxN {
+			maxN = n
+		}
+	}
+
 	fmt.Printf("\nResults from %d simulations:\n", total)
 	fmt.Printf("Frequency count: %v\n", n1)
 	fmt.Printf("\nProbabilities:\n")
-
-	keys := make([]int, 0, len(n1))
-	for k := range n1 {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
+	fmt.Printf("%-8s %-10s %-15s\n", "n1", "Frequency", "P(n1 = x)")
+	fmt.Println(strings.Repeat("-", 35))
 
 	totalProbability := 0.0
-	for _, k := range keys {
-		freq := n1[k]
+	for n := 0; n <= maxN; n++ {
+		freq := n1[n]
 		probability := float64(freq) / float64(total)
 		totalProbability += probability
-		fmt.Printf("P(n1 = %d) = %d/%d = %.6f\n", k, freq, total, probability)
+		fmt.Printf("%-8d %-10d %-15.6f\n", n, freq, probability)
 	}
 
-	fmt.Printf("\nTotal probability: %.6f\n", totalProbability)
+	fmt.Printf("%-8s %-10s %-15.6f\n", "Total", "", totalProbability)
 }
 
 func initialstate(ET0, ET1 float64) int {
@@ -178,9 +179,9 @@ func wifi_visit(
 ) (int, []int) {
 	state := initialstate
 	countOfOnes := 0
+	var wifiVisit []int
 	_ = P1T
 	_ = P0T
-	var wifiVisit []int
 
 	wifiVisit = append(wifiVisit, state)
 	if state == 1 {
