@@ -35,7 +35,7 @@ func main() {
 	transitionCount["P1T"] = 0
 	transitionCount["P0T"] = 0
 
-	counter := 10000
+	counter := 50000
 
 	fmt.Printf("Parameters:\n")
 	fmt.Printf("ET0: %.2f, ET1: %.2f, ETmu: %.2f\n", ET0, ET1, ETmu)
