@@ -1,6 +1,6 @@
 FROM golang:1.24-alpine AS builder
 
-WORKDIR /app
+WORKDIR /Wifi_visit_v5
 
 RUN apk add --no-cache git
 
