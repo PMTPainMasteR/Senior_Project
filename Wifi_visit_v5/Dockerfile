@@ -8,7 +8,7 @@ COPY go.mod ./
 
 RUN go mod download
 
-COPY . .dockerignore
+COPY *.go ./
 
 RUN CGO_ENABLED=0 go build -o wifi-sim .
 
