@@ -1,10 +1,10 @@
 FROM golang:1.24.11-alpine AS builder
 
-WORKDIR /app
+WORKDIR /Wifi_visit_v5
 
 RUN apk add --no-cache git
 
-COPY go.mod go.sum* ./
+COPY go.mod ./
 
 RUN go mod download
 
