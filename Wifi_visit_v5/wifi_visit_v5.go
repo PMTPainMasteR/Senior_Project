@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"strings"
-	"testing"
 )
 
 type TransitionCount map[string]int
@@ -15,64 +14,6 @@ type keyProbability struct {
 	nCount    int
 }
 
-func TestWifiVisitSimulation(t *testing.T) {
-	lambda0 := math.Pow(200, -1)
-	lambda1 := math.Pow(400, -1)
-	mu := math.Pow(250, -1)
-	ET0 := 1 / lambda0
-	ET1 := 1 / lambda1
-	ETmu := 1 / mu
-
-	P10 := mu / (lambda0 + mu)
-	P01 := mu / (lambda1 + mu)
-	P1T := lambda0 / (lambda0 + mu)
-	P0T := lambda1 / (lambda1 + mu)
-
-	transitionCount := make(TransitionCount)
-	transitionCount["P10"] = 0
-	transitionCount["P01"] = 0
-	transitionCount["P1T"] = 0
-	transitionCount["P0T"] = 0
-
-	counter := 15000
-
-	fmt.Printf("Parameters:\n")
-	fmt.Printf("ET0: %.2f, ET1: %.2f, ETmu: %.2f\n", ET0, ET1, ETmu)
-	fmt.Printf("P10 (1→0): %.4f\n", P10)
-	fmt.Printf("P01 (0→1): %.4f\n", P01)
-	fmt.Printf("P1T (1→T): %.4f\n", P1T)
-	fmt.Printf("P0T (0→T): %.4f\n", P0T)
-	fmt.Println()
-
-	n1 := runSimulations(counter, ET0, ET1, P10, P01, P1T, P0T, lambda0, lambda1, mu, transitionCount)
-
-	displayProbabilities(n1, counter)
-
-	totalTransitions := transitionCount["P10"] + transitionCount["P01"] + transitionCount["P1T"] + transitionCount["P0T"]
-	fmt.Printf("\nTransition Counts:\n")
-	fmt.Printf("P10 (1→0): %d\n", transitionCount["P10"])
-	fmt.Printf("P01 (0→1): %d\n", transitionCount["P01"])
-	fmt.Printf("P1T (1→T): %d\n", transitionCount["P1T"])
-	fmt.Printf("P0T (0→T): %d\n", transitionCount["P0T"])
-	fmt.Printf("Total transitions: %d\n", totalTransitions)
-
-	fmt.Printf("\nEmpirical Transition Probabilities:\n")
-	from1 := transitionCount["P10"] + transitionCount["P1T"]
-	if from1 > 0 {
-		p10_sim := float64(transitionCount["P10"]) / float64(from1)
-		p1T_sim := float64(transitionCount["P1T"]) / float64(from1)
-		fmt.Printf("P(1→0): %.6f (expected: %.4f)\n", p10_sim, P10)
-		fmt.Printf("P(1→T): %.6f (expected: %.4f)\n", p1T_sim, P1T)
-	}
-
-	from0 := transitionCount["P01"] + transitionCount["P0T"]
-	if from0 > 0 {
-		p01_sim := float64(transitionCount["P01"]) / float64(from0)
-		p0T_sim := float64(transitionCount["P0T"]) / float64(from0)
-		fmt.Printf("P(0→1): %.6f (expected: %.4f)\n", p01_sim, P01)
-		fmt.Printf("P(0→T): %.6f (expected: %.4f)\n", p0T_sim, P0T)
-	}
-}
 func main() {
 	lambda0 := math.Pow(200, -1)
 	lambda1 := math.Pow(400, -1)
