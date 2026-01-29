@@ -1,0 +1,169 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: docker
+    image: docker:24-dind
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375"]
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    volumeMounts:
+    - name: dind-storage
+      mountPath: /var/lib/docker
+  - name: golang
+    image: golang:1.24.11
+    command: ["/bin/sh", "-c"]
+    args: ["sleep infinity"]
+    env:
+    - name: DOCKER_HOST
+      value: tcp://localhost:2375
+  - name: trivy
+    image: aquasec/trivy:latest
+    command: ["sleep"]
+    args: ["infinity"]
+    volumeMounts:
+    - name: trivy-cache
+      mountPath: /root/.cache/trivy
+  volumes:
+  - name: dind-storage
+    emptyDir: {}
+  - name: trivy-cache
+    emptyDir: {}
+'''
+            defaultContainer 'golang'
+        }
+    }
+    environment {
+        DOCKER_HUB_REPO = 'pitchayawor1002/wifi-sim'
+        TRIVY_SEVERITY = 'CRITICAL,HIGH,MEDIUM'
+        TRIVY_EXIT_CODE = '1'
+        TRIVY_NO_PROGRESS = 'true'
+        TRIVY_CACHE_DIR = '/root/.cache/trivy'
+    }
+    stages {
+        stage('Clone Source Code from GitHub') {
+            steps {
+                script {
+                    echo 'Cloning repository...'
+                    checkout scmGit(
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/PMTPainMasteR/Senior_Project.git'
+                        ]]
+                    )
+                    sh 'git config --global --add safe.directory "$WORKSPACE"'
+                    env.IMAGE_TAG = sh(script: 'git rev-parse --short=8 HEAD', returnStdout: true).trim()
+                    echo "Building image with tag: ${env.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Unit Test') {
+            steps {
+                script {
+                    echo 'Running Go simulation...'
+                    sh 'cd Wifi_visit_v5 && go test -v .'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "Building Docker image locally: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
+                    container('docker') {
+                        sh '''
+                            export DOCKER_HOST=tcp://localhost:2375
+                            cd Wifi_visit_v5
+                            docker build -t ${DOCKER_HUB_REPO}:${IMAGE_TAG} .
+                            echo "Image built successfully"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Docker Image Scanning') {
+            steps {
+                script {
+                    echo "Scanning LOCAL image for vulnerabilities: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
+                    container('trivy') {
+                        sh """
+                            export DOCKER_HOST=tcp://localhost:2375
+                            echo "Performing security scan on local image..."
+                            # Generate SARIF report
+                            trivy image \\
+                                --severity ${TRIVY_SEVERITY} \\
+                                --scanners vuln \\
+                                --cache-dir ${TRIVY_CACHE_DIR} \\
+                                --format sarif \\
+                                --output /tmp/trivy-report.sarif \\
+                                ${DOCKER_HUB_REPO}:${IMAGE_TAG}
+                            
+                            # Fail pipeline on vulnerabilities (exit code check)
+                            trivy image \\
+                                --exit-code ${TRIVY_EXIT_CODE} \\
+                                --ignore-unfixed \\
+                                --severity ${TRIVY_SEVERITY} \\
+                                --scanners vuln \\
+                                --cache-dir ${TRIVY_CACHE_DIR} \\
+                                --format table \\
+                                ${DOCKER_HUB_REPO}:${IMAGE_TAG}
+                            
+                            mkdir -p ${WORKSPACE}/reports
+                            cp /tmp/trivy-report.sarif ${WORKSPACE}/reports/trivy-report.sarif
+                            echo "Security scan completed successfully - no ${TRIVY_SEVERITY} vulnerabilities found"
+                        """
+                    }
+                    archiveArtifacts artifacts: 'reports/trivy-report.sarif', allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    echo "Pushing validated image to Docker Hub: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
+                    container('docker') {
+                        withCredentials([usernamePassword(credentialsId: 'trainee-docker-hub-registry', 
+                            usernameVariable: 'DOCKER_USER', 
+                            passwordVariable: 'DOCKER_PASSWORD')]) {
+                            sh '''
+                                export DOCKER_HOST=tcp://localhost:2375
+                                echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+                                docker push ${DOCKER_HUB_REPO}:${IMAGE_TAG}
+                                docker logout
+                                echo "Image successfully pushed to Docker Hub"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                echo "Pipeline finished for image: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
+            }
+        }
+        failure {
+            script {
+                if (currentBuild.result == 'FAILURE') {
+                    echo "Pipeline failed - likely due to security vulnerabilities detected during scanning"
+                    echo "Download the 'trivy-report.sarif' artifact for detailed vulnerability report"
+                }
+            }
+        }
+        success {
+            script {
+                echo "Pipeline completed successfully - image scanned and pushed to Docker Hub"
+            }
+        }
+    }
+}
