@@ -1,3 +1,3 @@
-module wifi-visit-v5
+module wifi-sim
 
-go 1.24.11
+go 1.24.4
