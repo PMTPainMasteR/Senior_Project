@@ -12,8 +12,10 @@ COPY *.go ./
 
 RUN CGO_ENABLED=0 go build -o wifi-sim .
 
-FROM scratch
+FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /app/wifi-sim /wifi-sim
+
+USER nonroot:nonroot
 
 ENTRYPOINT ["/wifi-sim"]
