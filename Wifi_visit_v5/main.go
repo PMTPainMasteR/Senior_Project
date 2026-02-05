@@ -279,7 +279,8 @@ func case1(lambda0, lambda1, mu float64, n int) float64 {
 	if n == 0 {
 		return 0.0
 	}
-	return (lambda0 / (lambda1 + lambda0)) * math.Pow((math.Pow(mu, 2)/((lambda0+mu)*(lambda1+mu))), float64(n-1)) * (lambda0 / (lambda0 + mu))
+	powerBase := (mu * mu) / ((lambda0 + mu) * (lambda1 + mu))
+	return (lambda0 / (lambda1 + lambda0)) * math.Pow(powerBase, float64(n-1)) * (lambda0 / (lambda0 + mu))
 }
 
 func case2(lambda0, lambda1, mu float64, n int) float64 {
@@ -297,5 +298,6 @@ func case3(lambda0, lambda1, mu float64, n int) float64 {
 }
 
 func case4(lambda0, lambda1, mu float64, n int) float64 {
-	return (lambda1 / (lambda1 + lambda0)) * math.Pow((math.Pow(mu, 2)/((lambda1+mu)*(lambda0+mu))), float64(n)) * (lambda1 / (lambda1 + mu))
+	powerBase := (mu * mu) / ((lambda1 + mu) * (lambda0 + mu))
+	return (lambda1 / (lambda1 + lambda0)) * math.Pow(powerBase, float64(n)) * (lambda1 / (lambda1 + mu))
 }
