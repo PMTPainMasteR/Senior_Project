@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN apk add --no-cache \
     git=2.52.0-r0 \
-    curl=8.17.1-r1 \
+    curl=8.17.0-r1 \
     bash=5.3.3-r1
 
 COPY go.mod ./
