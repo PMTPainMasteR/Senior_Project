@@ -3,8 +3,8 @@ FROM golang:1.24.12-alpine AS builder
 WORKDIR /app
 
 RUN apk add --no-cache git \
-    curl=~7.79.1-r0 \
-    bash=~5.1.16-r0
+    curl=latest \
+    bash=latest
 
 COPY go.mod ./
 
