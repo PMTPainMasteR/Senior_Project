@@ -4,6 +4,8 @@ WORKDIR /app
 
 RUN apk add --no-cache git
 
+RUN apk add curl=7.79.1-r0 bash=5.1.8-r0
+
 COPY go.mod ./
 
 RUN go mod download
