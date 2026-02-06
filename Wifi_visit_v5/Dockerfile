@@ -2,7 +2,7 @@ FROM golang:1.24.12-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache "git" "curl=7.79.1" "bash=5.1.8"
+RUN apk add --no-cache "git" "curl>=7.79.1" "bash>=5.1.8"
 
 COPY go.mod ./
 
