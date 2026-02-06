@@ -2,8 +2,10 @@ FROM golang:1.24.12-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache "git" "curl>=7.79.1" "bash>=5.1.8"
-
+RUN apk add --no-cache \
+    git=2.42.0-r0 \
+    curl=8.2.1-r0 \
+    bash=5.2.15-r0
 COPY go.mod ./
 
 RUN go mod download
