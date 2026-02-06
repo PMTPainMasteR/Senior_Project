@@ -6,6 +6,7 @@ RUN apk add --no-cache \
     git=2.42.0-r0 \
     curl=8.2.1-r0 \
     bash=5.2.15-r0
+
 COPY go.mod ./
 
 RUN go mod download
