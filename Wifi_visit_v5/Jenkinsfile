@@ -12,28 +12,32 @@ spec:
     securityContext:
       privileged: true
       runAsUser: 0
-    volumeMounts:
-    - name: dind-storage
-      mountPath: /var/lib/docker
-  - name: golang
-    image: golang:1.24.11
-    command: ["/bin/sh", "-c"]
-    args: ["sleep infinity"]
     env:
     - name: DOCKER_HOST
       value: tcp://localhost:2375
+  - name: golang
+    image: golang:1.24.12
+    command: ["/bin/sh", "-c"]
+    args: ["sleep infinity"]
   - name: trivy
     image: aquasec/trivy:latest
     command: ["sleep"]
     args: ["infinity"]
-    volumeMounts:
-    - name: trivy-cache
-      mountPath: /root/.cache/trivy
-  volumes:
-  - name: dind-storage
-    emptyDir: {}
-  - name: trivy-cache
-    emptyDir: {}
+    env:
+    - name: DOCKER_HOST
+      value: tcp://localhost:2375
+  - name: gosec
+    image: securego/gosec:latest
+    command: ["sleep"]
+    args: ["infinity"]
+  - name: golangci
+    image: golangci/golangci-lint:latest
+    command: ["sleep"]
+    args: ["infinity"]
+  - name: hadolint
+    image: hadolint/hadolint:latest-alpine
+    command: ["sleep"]
+    args: ["infinity"]
 '''
             defaultContainer 'golang'
         }
@@ -41,14 +45,13 @@ spec:
     environment {
         DOCKER_HUB_REPO = 'pitchayawor1002/wifi-sim'
         TRIVY_SEVERITY = 'CRITICAL,HIGH,MEDIUM'
-        TRIVY_EXIT_CODE = '1'
-        TRIVY_NO_PROGRESS = 'true'
-        TRIVY_CACHE_DIR = '/root/.cache/trivy'
+        REPORTS_DIR = "${WORKSPACE}/reports"
     }
     stages {
         stage('Clone Source Code from GitHub') {
             steps {
                 script {
+                    sh "mkdir -p ${REPORTS_DIR}"
                     echo 'Cloning repository...'
                     checkout scmGit(
                         branches: [[name: '*/main']],
@@ -58,32 +61,186 @@ spec:
                     )
                     sh 'git config --global --add safe.directory "$WORKSPACE"'
                     env.IMAGE_TAG = sh(script: 'git rev-parse --short=8 HEAD', returnStdout: true).trim()
-                    echo "Building image with tag: ${env.IMAGE_TAG}"
+
+                    sh '''cat <<EOF > ${WORKSPACE}/openai.tpl
+{{- range . }}
+Target: {{ .Target }}
+{{- range .Vulnerabilities }}
+{{ .PkgName }}: {{ .InstalledVersion }} -> {{ .FixedVersion }} [{{ .Severity }}]
+{{- end }}
+{{- end }}
+EOF
+'''
                 }
             }
         }
 
         stage('Unit Test') {
             steps {
-                script {
-                    echo 'Running Go simulation...'
-                    sh 'cd Wifi_visit_v5 && go test -v .'
+                dir('Wifi_visit_v5') {
+                    sh "go test -v ./..."
+                }
+            }
+        }
+        
+        stage('Code Analysis w/ Golangci') {
+            steps {
+                container('golangci') {
+                    dir('Wifi_visit_v5') {
+                        script {
+                            echo "Running golangci-lint (v2) for Code Quality..."
+                            sh "mkdir -p ${REPORTS_DIR}"
+                            
+                            def exitCode = sh(
+                                script: "golangci-lint run ./... --output.json.path=${REPORTS_DIR}/go-lint-results.json --issues-exit-code=1",
+                                returnStatus: true
+                            )
+                            
+                            sh """
+                                if [ ! -s ${REPORTS_DIR}/go-lint-results.json ]; then
+                                    echo '{"Issues":[]}' > ${REPORTS_DIR}/go-lint-results.json
+                                fi
+                            """
+                            
+                            sh "golangci-lint run ./... || true"
+                            
+                            if (exitCode != 0) {
+                                echo "golangci-lint found quality issues (Exit Code: ${exitCode})"
+                                error("Code Quality Gate Failed")
+                            } else {
+                                echo "Code Quality is Excellent"
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/go-lint-results.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('SAST Scan w/ GoSec') {
+            steps {
+                container('gosec') {
+                    dir('Wifi_visit_v5') {
+                        script {
+                            echo "Running GoSec Security Scan..."
+                            sh "mkdir -p ${REPORTS_DIR}"
+                            
+                            def exitCode = sh(
+                                script: "gosec -fmt=json -out=${REPORTS_DIR}/gosec-result.json -severity medium ./...",
+                                returnStatus: true
+                            )
+                            
+                            sh "gosec -severity medium ./..."
+                            
+                            if (exitCode != 0) {
+                                echo "GoSec found security issues."
+                                error("Security Gate Failed: GoSec found vulnerabilities.")
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/gosec-result.json', allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Scan File System') {
+            steps {
+                container('trivy') {
+                    dir('Wifi_visit_v5') {
+                        script {
+                            sh """
+                                trivy fs \\
+                                    --ignore-unfixed \\
+                                    --severity ${TRIVY_SEVERITY} \\
+                                    --scanners vuln,misconfig \\
+                                    --format json \\
+                                    --output ${REPORTS_DIR}/trivy-fs.json \\
+                                    .
+                            """
+                            
+                            if (fileExists("${REPORTS_DIR}/trivy-fs.json")) {
+                                sh "trivy convert --format table --scanners vuln,misconfig ${REPORTS_DIR}/trivy-fs.json"
+                                sh "trivy convert --format template --template '@${WORKSPACE}/openai.tpl' --output ${REPORTS_DIR}/trivy-fs-ai.txt ${REPORTS_DIR}/trivy-fs.json"
+                                
+                                def fsResults = readJSON file: "${REPORTS_DIR}/trivy-fs.json"
+                                def fsVulns = fsResults.Results?.collect { it.Vulnerabilities ?: [] }?.flatten() ?: []
+                                def fsvulnCount = fsVulns.count { item -> ["CRITICAL", "HIGH", "MEDIUM"].contains(item?.Severity) }
+                                
+                                if (fsvulnCount > 0) {
+                                    error("Security Gate Failed: Vulnerabilities found in FileSystem.")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/trivy-fs.json,reports/trivy-fs-ai.txt', allowEmptyArchive: true
                 }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    echo "Building Docker image locally: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
-                    container('docker') {
-                        sh '''
-                            export DOCKER_HOST=tcp://localhost:2375
-                            cd Wifi_visit_v5
-                            docker build -t ${DOCKER_HUB_REPO}:${IMAGE_TAG} .
-                            echo "Image built successfully"
-                        '''
+                container('docker') {
+                    dir('Wifi_visit_v5') {
+                        script {
+                            echo "Build Docker Image..."
+                            sh "mkdir -p ${REPORTS_DIR}"
+                            def buildStatus = sh(
+                                script: "docker build -t ${DOCKER_HUB_REPO}:${IMAGE_TAG} . > ${REPORTS_DIR}/docker-build.log 2>&1",
+                                returnStatus: true
+                                )
+                            
+                            if (buildStatus != 0) {
+                                echo "Docker Build Failed with exit code ${buildStatus}"
+                                sh """
+                                    tail -n 50 ${REPORTS_DIR}/docker-build.log | \
+                                    grep -vE "Extracting|Downloading|Waiting|Verifying" \
+                                    > ${REPORTS_DIR}/docker-build-clean.log
+                                """ 
+                                error("Docker Build Failed with exit code ${buildStatus}")
+                            } else {
+                                echo "Build Successful! Skipping AI analysis."
+                                sh "rm ${REPORTS_DIR}/docker-build.log"
+                            }
+                        }
                     }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/docker-build.log,reports/docker-build-clean.log', allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage("Lint Dockerfile") {
+            steps {
+                container("hadolint") {
+                    dir('Wifi_visit_v5') {
+                        script {
+                            echo "Running Hodolint on Dockerfile..."
+                            sh "mkdir -p ${REPORTS_DIR}"
+                            
+                            sh "hadolint -f json Dockerfile > ${REPORTS_DIR}/hadolint-results.json || true"
+                            sh "hadolint --failure-threshold warning Dockerfile"
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/hadolint-results.json', allowEmptyArchive: true
                 }
             }
         }
@@ -91,78 +248,178 @@ spec:
         stage('Docker Image Scanning') {
             steps {
                 script {
-                    echo "Scanning LOCAL image for vulnerabilities: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
                     container('trivy') {
-                        sh """
-                            export DOCKER_HOST=tcp://localhost:2375
-                            echo "Performing security scan on local image..."
-                            # Generate SARIF report
-                            trivy image \\
-                                --severity ${TRIVY_SEVERITY} \\
-                                --scanners vuln \\
-                                --cache-dir ${TRIVY_CACHE_DIR} \\
-                                --format sarif \\
-                                --output /tmp/trivy-report.sarif \\
-                                ${DOCKER_HUB_REPO}:${IMAGE_TAG}
+                        sh "trivy image --ignore-unfixed --severity ${TRIVY_SEVERITY} --scanners vuln --format json --output ${REPORTS_DIR}/trivy-image-results.json ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
+                        
+                        if (fileExists("${REPORTS_DIR}/trivy-image-results.json")) {
+                            sh "trivy convert --format table --scanners vuln ${REPORTS_DIR}/trivy-image-results.json"
+                            sh "trivy convert --format template --template '@${WORKSPACE}/openai.tpl' --output ${REPORTS_DIR}/trivy-image-ai.txt ${REPORTS_DIR}/trivy-image-results.json"
+
+                            def imgResults = readJSON file: "${REPORTS_DIR}/trivy-image-results.json"
+                            def imgVulns = imgResults.Results?.collect { it.Vulnerabilities ?: [] }?.flatten() ?: []
+                            def imgvulnCount = imgVulns.count { item -> ["CRITICAL", "HIGH", "MEDIUM"].contains(item?.Severity) }
                             
-                            # Fail pipeline on vulnerabilities (exit code check)
-                            trivy image \\
-                                --exit-code ${TRIVY_EXIT_CODE} \\
-                                --ignore-unfixed \\
-                                --severity ${TRIVY_SEVERITY} \\
-                                --scanners vuln \\
-                                --cache-dir ${TRIVY_CACHE_DIR} \\
-                                --format table \\
-                                ${DOCKER_HUB_REPO}:${IMAGE_TAG}
-                            
-                            mkdir -p ${WORKSPACE}/reports
-                            cp /tmp/trivy-report.sarif ${WORKSPACE}/reports/trivy-report.sarif
-                            echo "Security scan completed successfully - no ${TRIVY_SEVERITY} vulnerabilities found"
-                        """
+                            if (imgvulnCount > 0) {
+                                error("Security Gate Failed: Vulnerabilities found in Docker Image.")
+                            }
+                        }
                     }
-                    archiveArtifacts artifacts: 'reports/trivy-report.sarif', allowEmptyArchive: false
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/trivy-image-results.json,reports/trivy-image-ai.txt', allowEmptyArchive: true
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                script {
-                    echo "Pushing validated image to Docker Hub: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
-                    container('docker') {
-                        withCredentials([usernamePassword(credentialsId: 'trainee-docker-hub-registry', 
-                            usernameVariable: 'DOCKER_USER', 
-                            passwordVariable: 'DOCKER_PASSWORD')]) {
-                            sh '''
-                                export DOCKER_HOST=tcp://localhost:2375
-                                echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
-                                docker push ${DOCKER_HUB_REPO}:${IMAGE_TAG}
-                                docker logout
-                                echo "Image successfully pushed to Docker Hub"
-                            '''
-                        }
+                container('docker') {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'trainee-docker-hub-registry',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
+                        sh """
+                            echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USER" --password-stdin
+                            docker push ${DOCKER_HUB_REPO}:${IMAGE_TAG}
+                            docker logout
+                        """
                     }
                 }
             }
         }
     }
     post {
-        always {
-            script {
-                echo "Pipeline finished for image: ${DOCKER_HUB_REPO}:${IMAGE_TAG}"
-            }
-        }
         failure {
             script {
-                if (currentBuild.result == 'FAILURE') {
-                    echo "Pipeline failed - likely due to security vulnerabilities detected during scanning"
-                    echo "Download the 'trivy-report.sarif' artifact for detailed vulnerability report"
+                echo "Pipeline failed. Preparing to send report to AI..."
+                container('docker') {
+                    sh "chmod -R 777 ${REPORTS_DIR}"
                 }
-            }
-        }
-        success {
-            script {
-                echo "Pipeline completed successfully - image scanned and pushed to Docker Hub"
+
+                def azureEndpoint = "https://tcaipoc.openai.azure.com/openai/deployments/gpt-4.1-mini/chat/completions?api-version=2025-01-01-preview"
+                def reportsToSend = [
+                    "go-lint-results.json", 
+                    "gosec-result.json", 
+                    "trivy-fs-ai.txt",
+                    "docker-build-clean.log",
+                    "hadolint-results.json", 
+                    "trivy-image-ai.txt"
+                ]
+                
+                withCredentials([string(credentialsId: 'trainee-api-token', variable: 'AZURE_OPENAI_TOKEN')]) {
+                    reportsToSend.each { fileName -> 
+                        def filePath = "${REPORTS_DIR}/${fileName}"
+                        
+                        if (fileExists(filePath)) {
+                            def reportContent = readFile file: filePath
+                            
+                            boolean hasIssues = (reportContent =~ /"Issues":\s*\[\s*[^\]]/) || 
+                                               (reportContent =~ /"Vulnerabilities":\s*\[\s*[^\]]/) || 
+                                               (reportContent =~ /"code":\s*"DL/) || 
+                                               (fileName == "docker-build-clean.log") ||
+                                               (fileName.endsWith('.txt') && reportContent.contains("["))
+
+                            if (hasIssues) {
+                                echo "Analyzing ${fileName} with AI..."
+
+                                def userContent = "Report for ${fileName}:\n\n${reportContent}"
+                                def systemPrompt = ""
+
+                                def dockerfilePath = "Wifi_visit_v5/Dockerfile"
+                                def dockerfileContent = fileExists(dockerfilePath) ? readFile(dockerfilePath) : "Dockerfile not found."
+                                
+                                if (fileName.endsWith('.go') || fileName == 'go.mod' || fileName == 'go.sum' || fileName.contains("go")) {
+                                    systemPrompt = """You are an Expert DevSecOps engineer specializing in Go security.
+Analyze this Go vulnerability report and provide actionable fixes:
+1. **Executive Summary**: 1-sentence risk assessment focusing on Go-specific issues.
+2. **Top Vulnerabilities**: Group by critical Go stdlib issues and third-party dependency CVEs.
+3. **How to Fix**: Show exact `go get` commands. If you suggest code fixes, you MUST provide: Location (file/library), Existed Code (Show Location also), and Fix Suggestion.
+4. **Educational Note**: Explain the specific Go-related risk."""
+
+                                } else if (fileName == "hadolint-results.json") {
+                                    systemPrompt = """You are an Expert DevSecOps engineer. 
+Analyze the Hadolint JSON report against the provided Dockerfile.
+1. **Issues**: Explain the linting violations.
+2. **Corrected Dockerfile**: Provide a FULL updated Dockerfile that fixes these issues and follows security best practices (Specifying the actual latest practical version ).
+3. **Security Tip**: Explain why these changes improve the container's security posture."""
+
+                                    userContent = """HADOLINT JSON REPORT:
+${reportContent}
+
+DOCKERFILE CONTENT:
+${dockerfileContent}"""
+                                    
+                                } else if (fileName.endsWith('.json') || fileName.endsWith('.txt') || fileName.endsWith('.html')) {
+                                    systemPrompt = """You are an Expert DevSecOps engineer analyzing container/image vulnerabilities.
+Analyze this Trivy security scan report and provide actionable fixes:
+1. **Executive Summary**: 1-sentence explanation of why the pipeline failed.
+2. **Top Fixes Required**: Group by Base image vulnerabilities, Language dependencies, and OS packages.
+3. **How to Fix**: Show exact Dockerfile changes or `apk/apt` upgrade commands."""
+
+                                } else if (fileName == "docker-build-clean.log") {
+                                    systemPrompt = """You are an Expert DevSecOps engineer.
+The Docker build failed. I am providing the build logs AND the Dockerfile.
+1. **Identify Error**: Point out exactly which line in the Dockerfile caused the build failure.
+2. **The Fix**: Provide the corrected Dockerfile or the missing command to fix the build.
+3. **Reasoning**: Explain why this error occurred (e.g., missing dependency, incorrect path, or network issue)."""
+                                    
+                                    userContent = """FAILED BUILD LOGS (Last 50 lines):
+${reportContent}
+
+DOCKERFILE CONTENT:
+${dockerfileContent}"""
+
+                                } else {
+                                    systemPrompt = """You are a security analyst. This is a vulnerability report file.
+Provide ONLY:
+1. File type analysis (based on metadata only)
+2. General remediation categories (base image, dependencies, config)
+3. NO code suggestions without explicit vulnerability details"""
+                                }
+
+                                def payload = [
+                                    messages: [
+                                        [role: "system", content: systemPrompt],
+                                        [role: "user", content: userContent]
+                                    ],
+                                    max_tokens: 1200,
+                                    temperature: 0.7
+                                ]
+                                
+                                writeJSON file: "${REPORTS_DIR}/payload-${fileName}.json", json: payload
+                                
+                                def responseText = sh(
+                                    script: """
+                                        curl -s -X POST "${azureEndpoint}" \\
+                                        -H "Content-Type: application/json" \\
+                                        -H "api-key: \$AZURE_OPENAI_TOKEN" \\
+                                        -d @${REPORTS_DIR}/payload-${fileName}.json
+                                    """, 
+                                    returnStdout: true
+                                ).trim()
+                                
+                                try {
+                                    def jsonResponse = readJSON text: responseText
+                                    def aiAdvice = jsonResponse.choices[0].message.content
+                                    def cleanName = fileName.replaceAll('\\.json|\\.txt|\\.log', '')
+                                    def adviceFileName = "AI-ADVICE-${cleanName}.md"
+                                    
+                                    writeFile file: "${REPORTS_DIR}/${adviceFileName}", text: aiAdvice
+                                    
+                                    echo "AI Advice for ${fileName} generated successfully."
+                                } catch (Exception e) {
+                                    echo "Error processing AI response for ${fileName}: ${e.getMessage()}"
+                                }
+                            } else {
+                                echo "Skipping ${fileName}: No actual issues found in report."
+                            }
+                        }
+                    }
+                }
+                archiveArtifacts artifacts: "reports/AI-ADVICE-*.md", allowEmptyArchive: true
             }
         }
     }
