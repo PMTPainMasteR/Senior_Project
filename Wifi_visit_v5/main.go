@@ -1,9 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"math"
-	"math/rand" // Switched from crypto/rand
 	"strings"
 )
 
@@ -74,9 +75,14 @@ func main() {
 	}
 }
 
-// insecureFloat64 replaces secureFloat64 for testing purposes
-func insecureFloat64() float64 {
-	return rand.Float64()
+func secureFloat64() (float64, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return 0, err
+	}
+	randUnit := binary.LittleEndian.Uint64(b[:])
+	const maxUint64AsFloat64 = float64(math.MaxUint64)
+	return float64(randUnit) / maxUint64AsFloat64, nil
 }
 
 // For testing: returns transition counts and frequencies
@@ -228,7 +234,10 @@ func displayProbabilities(n1 map[int]int, total int) {
 }
 
 func initialstate(ET0, ET1 float64) int {
-	U := insecureFloat64()
+	U, err := secureFloat64()
+	if err != nil {
+		panic(err)
+	}
 	P0 := ET0 / (ET0 + ET1)
 	if U <= P0 {
 		return 0
@@ -254,7 +263,10 @@ func wifi_visit(
 
 	for {
 		if state == 0 {
-			U := insecureFloat64()
+			U, err := secureFloat64()
+			if err != nil {
+				panic(err)
+			}
 			if U <= P01 {
 				state = 1
 				wifiVisit = append(wifiVisit, state)
@@ -265,7 +277,10 @@ func wifi_visit(
 				break
 			}
 		} else if state == 1 {
-			U := insecureFloat64()
+			U, err := secureFloat64()
+			if err != nil {
+				panic(err)
+			}
 			if U <= P10 {
 				state = 0
 				wifiVisit = append(wifiVisit, state)
