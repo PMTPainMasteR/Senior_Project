@@ -3,9 +3,9 @@ FROM golang:1.24.12-alpine AS builder
 WORKDIR /app
 
 RUN apk add --no-cache \
-    git=2.42.0-r0 \
-    curl=8.2.1-r0 \
-    bash=5.2.15-r0
+    git=2.52.0-r0 \
+    curl=8.17.1-r1 \
+    bash=5.3.3-r1
 
 COPY go.mod ./
 
