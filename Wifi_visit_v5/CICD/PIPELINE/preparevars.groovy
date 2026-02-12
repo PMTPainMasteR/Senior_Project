@@ -80,8 +80,8 @@ def globalVariable(envName) {
     env.npm_private_reg_token               = "${project_group}-npm-registry"
 
     // DEV
-    url_env_1                               = ""
-    url_root_path_env_1                     = ""
+    url_env_1                               = "https://github.com/PMTPainMasteR/Senior_Project.git"
+    url_root_path_env_1                     = "/Senior_Project/Wifi_visit_v5"
     url_health_check_path_env_1             = ""
 
     // UAT
