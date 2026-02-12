@@ -156,7 +156,7 @@ def globalVariable(envName) {
                     env.envName                 = cicd_env_1
                     // AKS
                     env.aks_credentials         = "${aks_credentials_cicd}-${envName}"
-                    env.aks_sevice_name         = aks_service_name_env_1
+                    env.aks_service_name         = aks_service_name_env_1
                     env.aks_service_rg          = aks_service_rg_env_1
                     // IMAGE
                     env.image_repo_server       = acr_server_env_1
