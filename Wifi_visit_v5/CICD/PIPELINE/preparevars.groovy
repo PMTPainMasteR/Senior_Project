@@ -103,6 +103,24 @@ def globalVariable(envName) {
     // PRD
     acr_server_env_4                    = ""
 
+    // Azure Config //
+    //! AKS Config //
+    aks_credentials_cicd                = "${project_group}-asp"
+    // DEV
+    aks_service_name_env_1              = "" // edit # AKS NAME
+    aks_service_rg_env_1                = "" // edit # Resource Group Name of AKS
+    // UAT
+    aks_service_name_env_3              = "" // edit # AKS NAME
+    aks_service_rg_env_3                = "" // edit # Resource Group Name of AKS
+    // PRD
+    aks_service_name_env_4              = "" // edit # AKS NAME
+    aks_service_rg_env_4                = "" // edit # Resource Group Name of AKS
+
+    // Custom Namespace
+    custom_namespace_env_1              = "" // DEV
+    custom_namespace_env_3              = "" // UAT
+    custom_namespace_env_4              = "" // PRD
+
     // !!!!----------------------------------------!!!! //
     // !!!!-------------- End to edit -------------!!!! //
     // !!!!----------------------------------------!!!! //
@@ -118,4 +136,95 @@ def globalVariable(envName) {
     env.skip_stage              = JsonOutput.toJson(skip_stage)
     env.image_registry_server   = JsonOutput.toJson(image_registry_server)
     env.container_os_platform   = JsonOutput.toJson(container_os_platform)
+
+    //! Azure key Vault Config //
+    // env.keyVault_url            = "https://kv-pdsdevsecops-prd-001.vault.azure.net/"
+    // env.keyVault_credential     = "valut-creds-for-jenkins-dgt"
+    //! End Azure key vault Config //
+
+    env.coverity_version        = [ "verions2024kube" : true ]
+
+    env.cicd_env_1              = "dev"
+    env.cicd_env_3              = "uat"
+    env.cicd_env_4              = "prd"
+
+    switch(env.BRANCH_NAME) {
+        case "develop":
+        case "hotfix":
+            switch(envName) {
+                case cicd_env_1:
+                    env.envName                 = cicd_env_1
+                    // AKS
+                    env.aks_credentials         = "${aks_credentials_cicd}-${envName}"
+                    env.aks_sevice_name         = aks_service_name_env_1
+                    env.aks_service_rg          = aks_service_rg_env_1
+                    // IMAGE
+                    env.image_repo_server       = acr_server_env_1
+                    env.image_credentials       = "${acr_credentials_cicd}-${cicd_env_1}"
+                    env.image_name              = "${env.image_repo_server}/${project_group}/${project_name}"
+                    // APP
+                    env.url_application         = url_env_1
+                    env.url_root_path           = url_root_path_env_1
+                    env.url_health_check_path   = url_health_check_path_env_1
+                    env.custom_namespace        = custom_namespace_env_1
+                break
+            }
+        case "hotfix":
+        case "hotfix-deploy":
+        case "master":
+        case "main":
+            switch(envName) {
+                case cicd_env_3:
+                    env.envName                   = cicd_env_3
+                    // AKS
+                    env.aks_credentials           = "${aks_credentials_cicd}-${envName}"
+                    env.aks_service_name          = aks_service_name_env_3
+                    env.aks_service_rg            = aks_service_rg_env_3
+                    // IMAGE
+                    env.image_prev_repo_server    = acr_server_env_1
+                    env.image_prev_credentials    = "${acr_credentials_cicd}-${cicd_env_1}"
+                    env.image_repo_server         = acr_server_env_3
+                    env.image_credentials         = "${acr_credentials_cicd}-${cicd_env_3}"
+                    env.image_prev_name           = "${env.image_prev_repo_server}/${project_group}/${project_name}"
+                    env.image_name                = "${env.image_repo_server}/${project_group}/${project_name}"
+                    // APP
+                    env.url_application           = url_env_3
+                    env.url_root_path             = url_root_path_env_3
+                    env.url_health_check_path     = url_health_check_path_env_3
+                    env.custom_namespace          = custom_namespace_env_3
+                    break
+                case cicd_env_4:
+                    env.envName = cicd_env_4
+                    // AKS
+                    env.aks_credentials           = "${aks_credentials_cicd}-${envName}"
+                    env.aks_service_name          = aks_service_name_env_4
+                    env.aks_service_rg            = aks_service_rg_env_4
+                    // IMAGE
+                    env.image_prev_repo_server    = acr_server_env_3
+                    env.image_prev_credentials    = "${acr_credentials_cicd}-${cicd_env_3}"
+                    env.image_repo_server         = acr_server_env_4
+                    env.image_credentials         = "${acr_credentials_cicd}-${cicd_env_4}"
+                    env.image_prev_name           = "${env.image_prev_repo_server}/${project_group}/${project_name}"
+                    env.image_name                = "${env.image_repo_server}/${project_group}/${project_name}"
+                    // APP
+                    env.url_application           = url_env_4
+                    env.url_root_path             = url_root_path_env_4
+                    env.url_health_check_path     = url_health_check_path_env_4
+                    env.custom_namespace          = custom_namespace_env_4
+                    break
+            }
+    }
 }
+
+def clonePipelineVariable(){
+    //! helm config //
+    env.helmRepoCred            = "git-dgt-user"
+    env.helmRepoUrl             = "https://git-dgt.pttdigital.com/devops/helm-charts-release/helm-chart-template.git"
+    env.helmRepoBranch          = "main"
+    env.helmWaitTimeout         = "5m0s"
+    env.helmChartName           = "simple-generic-aks"
+    env.helmRelativeTargetDir   = "helm-chart"
+    // helm config //
+}
+
+return this
